@@ -31,11 +31,13 @@ SOURCES: dict[str, str] = {
     'https://bestcf.pages.dev/xinyitang3/ipv4.txt': 'Mia',
     'https://bestcf.pages.dev/tiancheng/all.txt': 'Tiancheng',
     'https://raw.githubusercontent.com/gslege/CloudflareIP/refs/heads/main/SG.txt': 'Gslege-SG',
-    'https://raw.githubusercontent.com/gslege/CloudflareIP/refs/heads/main/DE.txt': 'Gslege-DE',
+    'https://bestcf.pages.dev/s5gy/hk.txt': 's5gy-hk',
+    'https://bestcf.pages.dev/s5gy/jp.txt': 's5gy-jp',
     'https://raw.githubusercontent.com/gslege/CloudflareIP/refs/heads/main/US.txt': 'Gslege-US',
     'https://raw.githubusercontent.com/ymyuuu/IPDB/refs/heads/main/BestCF/bestcfv4.txt': 'IPDB',
     'https://vps789.com/openApi/cfIpApi': 'VPS789',
     'https://api.4ce.cn/api/bestCFIP': 'vvhan',
+    'https://bestcf.pages.dev/luoli/all.txt': 'LuoLi',
 }
 
 PORT: str = '443'
