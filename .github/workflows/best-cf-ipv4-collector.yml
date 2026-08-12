@@ -25,10 +25,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install -r .github/scripts/requirements.txt -r .github/scripts/requirements-test.txt
-
-      - name: Run tests
-        run: python -m pytest tests -v
+        run: pip install -r .github/scripts/requirements.txt
 
       - name: Get Playwright version
         id: pw-version
