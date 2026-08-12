@@ -54,11 +54,11 @@
 </p>
 
 ## API
-- Raw：
+- Raw（EDT中优先使用此API）：
 ```
 https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ipv4.txt
 ```
-- 免梯：
+- 免梯（但数据延迟12-24h）：
 ```
 https://testingcf.jsdelivr.net/gh/LancelotRar/best-cf-ips@main/best-cf-ipv4.txt
 ```
