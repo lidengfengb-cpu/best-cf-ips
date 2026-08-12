@@ -1,8 +1,10 @@
 import ipaddress
+import json
 import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -40,14 +42,14 @@ SOURCES: dict[str, str] = {
     'https://bestcf.pages.dev/luoli/all.txt': 'LuoLi',
 }
 
-PORT: str = '443'
+DEFAULT_PORT: int = 443
 HEADERS: dict[str, str] = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
                   '(KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0',
 }
 IPV4_ENDPOINT_PATTERN: str = (
     r'(?<![\w.])((?:[0-9]{1,3}\.){3}[0-9]{1,3})'
-    r'(?::([0-9]{1,5}))?(?![\w.:])'
+    r'(?::([0-9]{1,5}))?(?![\w.:/])'
 )
 OUTPUT_FILE: Path = Path('best-cf-ipv4.txt')
 XDB_URL: str = 'https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v4.xdb'
@@ -81,17 +83,76 @@ def fetch(session: cf_requests.Session, url: str, timeout: int = 15) -> str:
 
 def extract_ipv4(text: str) -> set[tuple[str, str]]:
     """Extract valid IPv4 endpoints, preserving explicitly provided ports."""
+    stripped = text.lstrip('\ufeff\t\n\r ')
+    if stripped.startswith(('{', '[')):
+        try:
+            return extract_json_ipv4(json.loads(stripped))
+        except json.JSONDecodeError:
+            return set()
+    if stripped.startswith('<'):
+        parser = VisibleTextParser()
+        parser.feed(text)
+        text = parser.text
+
     endpoints: set[tuple[str, str]] = set()
     for match in re.finditer(IPV4_ENDPOINT_PATTERN, text):
         try:
             ip = str(ipaddress.ip_address(match.group(1)))
-            port = match.group(2) or PORT
-            if not 1 <= int(port) <= 65535:
+            port_number = int(match.group(2) or DEFAULT_PORT)
+            if not 1 <= port_number <= 65535:
                 continue
-            endpoints.add((ip, port))
+            endpoints.add((ip, str(port_number)))
         except ValueError:
             continue
     return endpoints
+
+
+def extract_json_ipv4(value: object) -> set[tuple[str, str]]:
+    """Extract endpoints only from fields explicitly named 'ip'."""
+    if isinstance(value, dict):
+        endpoints: set[tuple[str, str]] = set()
+        for key, child in value.items():
+            if key.casefold() == 'ip' and isinstance(child, str):
+                endpoints.update(extract_ipv4(child))
+            else:
+                endpoints.update(extract_json_ipv4(child))
+        return endpoints
+    if isinstance(value, list):
+        endpoints: set[tuple[str, str]] = set()
+        for child in value:
+            endpoints.update(extract_json_ipv4(child))
+        return endpoints
+    return set()
+
+
+class VisibleTextParser(HTMLParser):
+    """Collect visible HTML text while ignoring scripts and styles."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._ignored_depth = 0
+        self._parts: list[str] = []
+
+    @property
+    def text(self) -> str:
+        return ' '.join(self._parts)
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.casefold() in {'script', 'style'}:
+            self._ignored_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.casefold() in {'script', 'style'} and self._ignored_depth:
+            self._ignored_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if not self._ignored_depth:
+            self._parts.append(data)
+
+
+def sort_endpoints(endpoints: set[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Sort endpoints deterministically by IP and numeric port."""
+    return sorted(endpoints, key=lambda endpoint: (ipaddress.ip_address(endpoint[0]), int(endpoint[1])))
 
 
 def country_to_flag(code: str) -> str:
@@ -156,20 +217,41 @@ def _get_browser() -> 'Browser':
     if sync_playwright is None:
         raise RuntimeError('playwright not installed; run: pip install playwright && playwright install chromium')
     if _browser is None:
-        _pw = sync_playwright().start()
-        _browser = _pw.chromium.launch(headless=True)
+        pw = sync_playwright().start()
+        try:
+            browser = pw.chromium.launch(headless=True)
+        except Exception:
+            pw.stop()
+            raise
+        _pw = pw
+        _browser = browser
     return _browser
 
 
 def fetch_rendered(url: str, timeout: int = 30000) -> str:
     """Render a JS page with headless Chromium and return the final HTML."""
     context = _get_browser().new_context(user_agent=HEADERS['User-Agent'])
-    page = context.new_page()
     try:
+        page = context.new_page()
         page.goto(url, wait_until='networkidle', timeout=timeout)
         return page.content()
     finally:
         context.close()
+
+
+def close_browser() -> None:
+    """Close the reusable browser and Playwright runtime if they were started."""
+    global _browser, _pw
+    try:
+        if _browser is not None:
+            _browser.close()
+    finally:
+        _browser = None
+        if _pw is not None:
+            try:
+                _pw.stop()
+            finally:
+                _pw = None
 
 
 def collect_ips(session: cf_requests.Session) -> set[tuple[str, str]]:
@@ -214,25 +296,31 @@ def main() -> int:
     print('Collecting Cloudflare IPs...\n')
 
     session = _session()
+    try:
+        all_ips = collect_ips(session)
+        if not all_ips:
+            print('No IPs collected, skip')
+            return 1
+        print(f'\n{len(all_ips)} unique IPv4')
 
-    all_ips = collect_ips(session)
-    if not all_ips:
-        print('No IPs collected, skip')
-        return 1
-    print(f'\n{len(all_ips)} unique IPv4')
+        print('Querying locations...')
+        entries = enrich_locations(all_ips)
 
-    print('Querying locations...')
-    entries = enrich_locations(all_ips)
-
-    tmp = OUTPUT_FILE.with_suffix('.tmp')
-    timestamp = beijing_timestamp()
-    with tmp.open('w', encoding='utf-8') as f:
-        f.write(f'#{len(entries)} bestips updated at {timestamp}\n')
-        for ip_port, location in entries.items():
-            f.write(f'{ip_port}#{location} {country_to_flag(location)}\n')
-    tmp.replace(OUTPUT_FILE)
-    print(f'\n{len(entries)} IPs written to {OUTPUT_FILE}')
-    return 0
+        tmp = OUTPUT_FILE.with_suffix('.tmp')
+        timestamp = beijing_timestamp()
+        with tmp.open('w', encoding='utf-8') as f:
+            f.write(f'#{len(entries)} bestips updated at {timestamp}\n')
+            for ip, port in sort_endpoints(all_ips):
+                ip_port = f'{ip}:{port}'
+                f.write(f'{ip_port}#{entries[ip_port]} {country_to_flag(entries[ip_port])}\n')
+        tmp.replace(OUTPUT_FILE)
+        print(f'\n{len(entries)} IPs written to {OUTPUT_FILE}')
+        return 0
+    finally:
+        try:
+            session.close()
+        finally:
+            close_browser()
 
 
 if __name__ == '__main__':
