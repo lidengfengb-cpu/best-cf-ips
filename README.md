@@ -53,7 +53,7 @@
   <img src="src/good-job.png" alt="效果图">
 </p>
 
-## API
+## IP API
 - Raw（EDT中优先使用此API）：
 ```
 https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ipv4.txt
@@ -61,6 +61,16 @@ https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ipv4.txt
 - 免梯（但数据延迟12-24h）：
 ```
 https://testingcf.jsdelivr.net/gh/LancelotRar/best-cf-ips@main/best-cf-ipv4.txt
+```
+
+## 选域名API，可配合IP API共同使用
+- Raw：
+```
+https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-domain.txt
+```
+- 免梯（但数据延迟12-24h）：
+```
+https://testingcf.jsdelivr.net/gh/LancelotRar/best-cf-ips@main/best-cf-domain.txt
 ```
 
 ## 感谢以下个人或组织的公开的优选IP筛选数据
