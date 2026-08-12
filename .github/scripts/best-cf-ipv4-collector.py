@@ -43,7 +43,10 @@ HEADERS: dict[str, str] = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
                   '(KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0',
 }
-IPV4_PATTERN: str = r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b'
+IPV4_ENDPOINT_PATTERN: str = (
+    r'(?<![\w.])((?:[0-9]{1,3}\.){3}[0-9]{1,3})'
+    r'(?::([0-9]{1,5}))?(?![\w.:])'
+)
 OUTPUT_FILE: Path = Path('best-cf-ipv4.txt')
 XDB_URL: str = 'https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v4.xdb'
 XDB_FILE: Path = Path(__file__).resolve().parent / 'data' / 'ip2region_v4.xdb'
@@ -74,16 +77,19 @@ def fetch(session: cf_requests.Session, url: str, timeout: int = 15) -> str:
     raise last_err
 
 
-def extract_ipv4(text: str) -> set[str]:
-    """Extract valid IPv4 addresses from raw text."""
-    ips: set[str] = set()
-    for match in re.finditer(IPV4_PATTERN, text):
+def extract_ipv4(text: str) -> set[tuple[str, str]]:
+    """Extract valid IPv4 endpoints, preserving explicitly provided ports."""
+    endpoints: set[tuple[str, str]] = set()
+    for match in re.finditer(IPV4_ENDPOINT_PATTERN, text):
         try:
-            ip = ipaddress.ip_address(match.group())
-            ips.add(str(ip))
+            ip = str(ipaddress.ip_address(match.group(1)))
+            port = match.group(2) or PORT
+            if not 1 <= int(port) <= 65535:
+                continue
+            endpoints.add((ip, port))
         except ValueError:
             continue
-    return ips
+    return endpoints
 
 
 def country_to_flag(code: str) -> str:
@@ -164,13 +170,13 @@ def fetch_rendered(url: str, timeout: int = 30000) -> str:
         context.close()
 
 
-def collect_ips(session: cf_requests.Session) -> set[str]:
-    """Collect IPv4 from all sources, degrading from HTTP to headless browser.
+def collect_ips(session: cf_requests.Session) -> set[tuple[str, str]]:
+    """Collect IPv4 endpoints, degrading from HTTP to headless browser.
 
     A source is considered fetched successfully only when it yields at least
     one valid IPv4 address; otherwise the next fetcher tier is tried.
     """
-    all_ips: set[str] = set()
+    all_ips: set[tuple[str, str]] = set()
     tiers = [
         ('HTTP', lambda u: fetch(session, u)),
         ('Browser', fetch_rendered),
@@ -192,12 +198,12 @@ def collect_ips(session: cf_requests.Session) -> set[str]:
     return all_ips
 
 
-def enrich_locations(ips: set[str]) -> dict[str, str]:
-    """Query geographic locations for all IPs via the offline database."""
+def enrich_locations(ips: set[tuple[str, str]]) -> dict[str, str]:
+    """Query geographic locations for all IPv4 endpoints via the offline database."""
     _get_searcher()
     entries: dict[str, str] = {}
-    for ip in ips:
-        entries[f'{ip}:{PORT}'] = lookup_country(ip)
+    for ip, port in ips:
+        entries[f'{ip}:{port}'] = lookup_country(ip)
     return entries
 
 
