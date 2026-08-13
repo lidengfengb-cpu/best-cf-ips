@@ -54,13 +54,13 @@
 </p>
 
 ## IP API
-- Raw：
+
 ```
 https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ipv4.txt
 ```
 
 ## 优选域名API，可配合IP API共同使用。非即时更新，内容固定。
-- Raw：
+
 ```
 https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-domain.txt
 ```
