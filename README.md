@@ -54,23 +54,15 @@
 </p>
 
 ## IP API
-- Raw（EDT中优先使用此API）：
+- Raw：
 ```
 https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ipv4.txt
 ```
-- 免梯（但数据延迟12-24h）：
-```
-https://testingcf.jsdelivr.net/gh/LancelotRar/best-cf-ips@main/best-cf-ipv4.txt
-```
 
 ## 优选域名API，可配合IP API共同使用。非即时更新，内容固定。
-- Raw（EDT中优先使用此API）：
+- Raw：
 ```
 https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-domain.txt
-```
-- 免梯：
-```
-https://testingcf.jsdelivr.net/gh/LancelotRar/best-cf-ips@main/best-cf-domain.txt
 ```
 
 ## 感谢以下个人或组织的公开的优选IP筛选数据
