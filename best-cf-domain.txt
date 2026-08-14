@@ -4,7 +4,10 @@ nexusmods.com:443#优选 | nexusmods.com
 bluehost.com:443#优选 | bluehost.com
 glassdoor.com:443#优选 | glassdoor.com
 jimdo.com:443#优选 | jimdo.com
+mfa.gov.ua:443#优选 | mfa.gov.ua
 sage.com:443#优选 | sage.com
+staticdelivery.nexusmods.com:443#优选 | staticdelivery.nexusmods.com
+store.ubi.com:443#优选 | store.ubi.com
 www.speedtest.net:443#优选 | www.speedtest.net
 investor.apple.com:443#优选 | investor.apple.com
 markmonitor.com:443#优选 | markmonitor.com
@@ -26,5 +29,4 @@ skk.moe:443#优选 | skk.moe
 bestcf.030101.xyz:443#优选 | bestcf.030101.xyz
 cf.877774.xyz:443#优选 | cf.877774.xyz
 cf.090227.xyz:443#优选 | cf.090227.xyz
-cf.tencentapp.cn:443#优选 | cf.tencentapp.cn
 thewoodflooringhub.co.uk:443#优选 | thewoodflooringhub.co.uk
