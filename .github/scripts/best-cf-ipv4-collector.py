@@ -495,7 +495,7 @@ def main() -> int:
             for item in selected:
                 ip_port = f"{item['ip']}:{item['port']}"
                 country = country_to_zh(entries[ip_port]) + ' ' + country_to_flag(entries[ip_port])
-                speed_tag = f"{item['speed']:.0f}MB/s {item['latency']:.0f}ms"
+                speed_tag = f"{item['speed']:.0f}MB/s"
                 f.write(f'{ip_port}#{country} {speed_tag}\n')
         tmp.replace(OUTPUT_FILE)
         print(f'\n{len(entries)} IPs written to {OUTPUT_FILE}')
