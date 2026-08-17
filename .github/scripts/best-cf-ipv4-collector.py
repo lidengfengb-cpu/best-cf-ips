@@ -1,8 +1,11 @@
 import ipaddress
 import json
 import re
+import socket
+import ssl
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from pathlib import Path
@@ -56,6 +59,17 @@ XDB_URL: str = 'https://raw.githubusercontent.com/lionsoul2014/ip2region/master/
 XDB_FILE: Path = Path(__file__).resolve().parent / 'data' / 'ip2region_v4.xdb'
 MAX_RETRIES: int = 3
 RETRY_BACKOFF_FACTOR: float = 2.0
+
+# Speed/latency selection configuration
+SPEED_HOST: str = 'speed.cloudflare.com'
+SPEED_DOWNLOAD_BYTES: int = 10 * 1024 * 1024
+LATENCY_TIMEOUT: float = 3.0
+SPEED_TIMEOUT: float = 20.0
+LATENCY_THREADS: int = 100
+SPEED_THREADS: int = 5
+LATENCY_KEEP: int = 50
+TOP_KEEP: int = 20
+MIN_SPEED_MBPS: float = 1.0
 
 
 def _session() -> cf_requests.Session:
@@ -362,6 +376,84 @@ def collect_ips(session: cf_requests.Session) -> set[tuple[str, str]]:
     return all_ips
 
 
+def measure_latency(ip: str, port: str, timeout: float = LATENCY_TIMEOUT) -> float | None:
+    """Measure TCP+TLS handshake latency in ms, return None on failure."""
+    start = time.monotonic()
+    try:
+        with socket.create_connection((ip, int(port)), timeout=timeout) as raw:
+            with ssl.create_default_context().wrap_socket(raw, server_hostname=SPEED_HOST):
+                return (time.monotonic() - start) * 1000
+    except (OSError, ssl.SSLError, ValueError):
+        return None
+
+
+def measure_speed(ip: str, port: str, timeout: float = SPEED_TIMEOUT) -> float | None:
+    """Download a small file through the CF node and return speed in MB/s."""
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        with socket.create_connection((ip, int(port)), timeout=timeout) as raw:
+            raw.settimeout(timeout)
+            with ctx.wrap_socket(raw, server_hostname=SPEED_HOST) as sock:
+                request = (
+                    f'GET /__down?bytes={SPEED_DOWNLOAD_BYTES} HTTP/1.1\r\n'
+                    f'Host: {SPEED_HOST}\r\n'
+                    'Connection: close\r\n'
+                    'User-Agent: curl/8.0\r\n'
+                    '\r\n'
+                )
+                sock.sendall(request.encode())
+                start = time.monotonic()
+                downloaded = 0
+                while True:
+                    chunk = sock.recv(65536)
+                    if not chunk:
+                        break
+                    downloaded += len(chunk)
+                elapsed = time.monotonic() - start
+                if elapsed <= 0:
+                    return None
+                return downloaded / elapsed / (1024 * 1024)
+    except (OSError, ssl.SSLError, ValueError):
+        return None
+
+
+def select_best_ips(ips: set[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Two-stage selection: latency filter, then speed test, keep top N."""
+    print('Stage 1: measuring latency on all IPs...')
+    latencies: dict[tuple[str, str], float] = {}
+    with ThreadPoolExecutor(max_workers=LATENCY_THREADS) as pool:
+        futures = {pool.submit(measure_latency, ip, port): (ip, port) for ip, port in ips}
+        for future in as_completed(futures):
+            ep = futures[future]
+            result = future.result()
+            if result is not None:
+                latencies[ep] = result
+    print(f'  {len(latencies)}/{len(ips)} reachable')
+    if not latencies:
+        return []
+
+    sorted_by_latency = sorted(latencies, key=latencies.get)[:LATENCY_KEEP]
+    print(f'  keeping {len(sorted_by_latency)} lowest-latency IPs')
+
+    print('Stage 2: measuring download speed...')
+    speeds: dict[tuple[str, str], float] = {}
+    with ThreadPoolExecutor(max_workers=SPEED_THREADS) as pool:
+        futures = {pool.submit(measure_speed, ip, port): (ip, port) for ip, port in sorted_by_latency}
+        for future in as_completed(futures):
+            ep = futures[future]
+            result = future.result()
+            if result is not None and result >= MIN_SPEED_MBPS:
+                speeds[ep] = result
+
+    ranked = sorted(speeds, key=speeds.get, reverse=True)[:TOP_KEEP]
+    print(f'  {len(speeds)} IPs above {MIN_SPEED_MBPS} MB/s, keeping top {len(ranked)}')
+    for rank, ep in enumerate(ranked, 1):
+        print(f'    #{rank:<3} {ep[0]}:{ep[1]}  {speeds[ep]:.1f} MB/s  {latencies[ep]:.0f} ms')
+    return ranked
+
+
 def enrich_locations(ips: set[tuple[str, str]]) -> dict[str, str]:
     """Query geographic locations for all IPv4 endpoints via the offline database."""
     _get_searcher()
@@ -383,14 +475,20 @@ def main() -> int:
             return 1
         print(f'\n{len(all_ips)} unique IPv4')
 
+        selected = select_best_ips(all_ips)
+        if not selected:
+            print('No IPs passed speed test, skip')
+            return 1
+        print(f'\nSelected {len(selected)} IPs')
+
         print('Querying locations...')
-        entries = enrich_locations(all_ips)
+        entries = enrich_locations(set(selected))
 
         tmp = OUTPUT_FILE.with_suffix('.tmp')
         timestamp = beijing_timestamp()
         with tmp.open('w', encoding='utf-8') as f:
             f.write(f'#{len(entries)} bestips updated at {timestamp}\n')
-            for ip, port in sort_endpoints(all_ips):
+            for ip, port in selected:
                 ip_port = f'{ip}:{port}'
                 f.write(f'{ip_port}#{country_to_zh(entries[ip_port])} {country_to_flag(entries[ip_port])}\n')
         tmp.replace(OUTPUT_FILE)
