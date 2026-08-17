@@ -419,7 +419,7 @@ def measure_speed(ip: str, port: str, timeout: float = SPEED_TIMEOUT) -> float |
         return None
 
 
-def select_best_ips(ips: set[tuple[str, str]]) -> list[tuple[str, str]]:
+def select_best_ips(ips: set[tuple[str, str]]) -> list[dict[str, object]]:
     """Two-stage selection: latency filter, then speed test, keep top N."""
     print('Stage 1: measuring latency on all IPs...')
     latencies: dict[tuple[str, str], float] = {}
@@ -449,9 +449,13 @@ def select_best_ips(ips: set[tuple[str, str]]) -> list[tuple[str, str]]:
 
     ranked = sorted(speeds, key=speeds.get, reverse=True)[:TOP_KEEP]
     print(f'  {len(speeds)} IPs above {MIN_SPEED_MBPS} MB/s, keeping top {len(ranked)}')
+    result: list[dict[str, object]] = []
     for rank, ep in enumerate(ranked, 1):
-        print(f'    #{rank:<3} {ep[0]}:{ep[1]}  {speeds[ep]:.1f} MB/s  {latencies[ep]:.0f} ms')
-    return ranked
+        speed = speeds[ep]
+        latency = latencies[ep]
+        print(f'    #{rank:<3} {ep[0]}:{ep[1]}  {speed:.1f} MB/s  {latency:.0f} ms')
+        result.append({'ip': ep[0], 'port': ep[1], 'speed': speed, 'latency': latency})
+    return result
 
 
 def enrich_locations(ips: set[tuple[str, str]]) -> dict[str, str]:
@@ -482,15 +486,17 @@ def main() -> int:
         print(f'\nSelected {len(selected)} IPs')
 
         print('Querying locations...')
-        entries = enrich_locations(set(selected))
+        entries = enrich_locations({(item['ip'], item['port']) for item in selected})
 
         tmp = OUTPUT_FILE.with_suffix('.tmp')
         timestamp = beijing_timestamp()
         with tmp.open('w', encoding='utf-8') as f:
             f.write(f'#{len(entries)} bestips updated at {timestamp}\n')
-            for ip, port in selected:
-                ip_port = f'{ip}:{port}'
-                f.write(f'{ip_port}#{country_to_zh(entries[ip_port])} {country_to_flag(entries[ip_port])}\n')
+            for item in selected:
+                ip_port = f"{item['ip']}:{item['port']}"
+                country = country_to_zh(entries[ip_port]) + ' ' + country_to_flag(entries[ip_port])
+                speed_tag = f"{item['speed']:.0f}MB/s {item['latency']:.0f}ms"
+                f.write(f'{ip_port}#{country} {speed_tag}\n')
         tmp.replace(OUTPUT_FILE)
         print(f'\n{len(entries)} IPs written to {OUTPUT_FILE}')
         return 0
