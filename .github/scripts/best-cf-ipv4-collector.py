@@ -266,7 +266,15 @@ def lookup_country(ip: str) -> str:
     """Look up ISO-3166 country code offline via ip2region, return 'XX' on failure."""
     try:
         region = _get_searcher().search(ip)
-        code = region.split('|')[-1].strip()
+        parts = [p.strip() for p in region.split('|')]
+        for region_name, code in (
+            ('香港特别行政区', 'HK'),
+            ('澳门特别行政区', 'MO'),
+            ('台湾省', 'TW'),
+        ):
+            if region_name in parts:
+                return code
+        code = parts[-1].strip()
         if re.fullmatch(r'[A-Z]{2}', code):
             return code
     except Exception:
