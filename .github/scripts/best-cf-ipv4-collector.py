@@ -67,9 +67,10 @@ LATENCY_TIMEOUT: float = 3.0
 SPEED_TIMEOUT: float = 20.0
 LATENCY_THREADS: int = 100
 SPEED_THREADS: int = 5
-LATENCY_KEEP: int = 100
+LATENCY_KEEP: int = 200
 TOP_KEEP: int = 50
 MIN_SPEED_MBPS: float = 1.0
+MAX_PER_COUNTRY: int = 5
 
 
 def _session() -> cf_requests.Session:
@@ -447,14 +448,39 @@ def select_best_ips(ips: set[tuple[str, str]]) -> list[dict[str, object]]:
             if result is not None and result >= MIN_SPEED_MBPS:
                 speeds[ep] = result
 
-    ranked = sorted(speeds, key=speeds.get, reverse=True)[:TOP_KEEP]
-    print(f'  {len(speeds)} IPs above {MIN_SPEED_MBPS} MB/s, keeping top {len(ranked)}')
+    ranked = sorted(speeds, key=speeds.get, reverse=True)
+    print(f'  {len(speeds)} IPs above {MIN_SPEED_MBPS} MB/s')
     result: list[dict[str, object]] = []
     for rank, ep in enumerate(ranked, 1):
         speed = speeds[ep]
         latency = latencies[ep]
         print(f'    #{rank:<3} {ep[0]}:{ep[1]}  {speed:.1f} MB/s  {latency:.0f} ms')
         result.append({'ip': ep[0], 'port': ep[1], 'speed': speed, 'latency': latency})
+    return result
+
+
+def select_by_country(
+    ranked: list[dict[str, object]],
+    entries: dict[str, str],
+    max_per_country: int = MAX_PER_COUNTRY,
+    top_keep: int = TOP_KEEP,
+) -> list[dict[str, object]]:
+    """Keep at most ``max_per_country`` IPs per country, up to ``top_keep`` total.
+
+    Iterates candidates in speed-descending order and caps the count per country
+    so fast nodes from one country do not crowd out the rest.
+    """
+    counts: dict[str, int] = {}
+    result: list[dict[str, object]] = []
+    for item in ranked:
+        if len(result) >= top_keep:
+            break
+        ip_port = f"{item['ip']}:{item['port']}"
+        country = entries.get(ip_port, 'XX')
+        if counts.get(country, 0) >= max_per_country:
+            continue
+        counts[country] = counts.get(country, 0) + 1
+        result.append(item)
     return result
 
 
@@ -483,10 +509,16 @@ def main() -> int:
         if not selected:
             print('No IPs passed speed test, skip')
             return 1
-        print(f'\nSelected {len(selected)} IPs')
+        print(f'\nSelected {len(selected)} IPs by speed')
 
         print('Querying locations...')
         entries = enrich_locations({(item['ip'], item['port']) for item in selected})
+
+        selected = select_by_country(selected, entries)
+        if not selected:
+            print('No IPs after per-country balancing, skip')
+            return 1
+        print(f'After per-country balancing ({MAX_PER_COUNTRY}/country): {len(selected)} IPs')
 
         tmp = OUTPUT_FILE.with_suffix('.tmp')
         timestamp = beijing_timestamp()
